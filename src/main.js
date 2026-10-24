@@ -10,7 +10,7 @@ scene.fog = new THREE.Fog(0x9bc0bf, 28, 76);
 
 const camera = new THREE.PerspectiveCamera(76, innerWidth / innerHeight, 0.1, 120);
 camera.rotation.order = "YXZ";
-camera.position.set(0, CONFIG.playerHeight, 7);
+camera.position.set(0, CONFIG.playerHeight, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.35 : 1.8));
@@ -128,7 +128,7 @@ weapon.position.set(.32,-.28,-.56);
 camera.add(weapon); scene.add(camera);
 
 // Local player state. Movement is client-side in this prototype; later the server becomes authoritative.
-const player = { x:0, z:7, yaw:0, pitch:0, speed:CONFIG.moveSpeed, health:100, score:0, grounded:true, vy:0 };
+const player = { x:0, z:0, yaw:0, pitch:0, speed:CONFIG.moveSpeed, health:100, score:0, grounded:true, vy:0, jumpHeight:0 };
 const keys = new Set();
 const input = { moveX:0, moveY:0, firing:false, jumping:false };
 let started = false, lastShot = 0, recoil = 0, hitFlash = 0;
@@ -150,8 +150,14 @@ function updateHUD() {
   document.querySelector("#score-number").textContent=String(player.score).padStart(2,"0");
 }
 function collides(x,z,r=.34) {
-  if (Math.abs(x)>CONFIG.arenaHalfSize-r-1 || Math.abs(z)>CONFIG.arenaHalfSize-r-1) return true;
-  return colliders.some(c => x+r>c.minX && x-r<c.maxX && z+r>c.minZ && z-r<c.maxZ);
+  if (Math.abs(x)>CONFIG.arenaHalfSize+0.5-r || Math.abs(z)>CONFIG.arenaHalfSize+0.5-r) return true;
+  return colliders.some(c => {
+    // Circular player footprint against each rectangular obstacle: less corner-sticking.
+    const closestX = THREE.MathUtils.clamp(x, c.minX, c.maxX);
+    const closestZ = THREE.MathUtils.clamp(z, c.minZ, c.maxZ);
+    const dx = x - closestX, dz = z - closestZ;
+    return dx*dx + dz*dz < r*r;
+  });
 }
 function movePlayer(dx,dz) {
   // Axis-separated collision response keeps movement sliding along walls.
@@ -186,7 +192,7 @@ function shoot() {
   } else showToast("ALVO NÃO ATINGIDO",500);
 }
 function jump() {
-  if(player.grounded) { player.vy=5.2; player.grounded=false; }
+  if(player.grounded) { player.vy=5.2; player.grounded=false; input.jumping=true; }
 }
 
 function setLook(dx,dy) {
@@ -195,7 +201,7 @@ function setLook(dx,dy) {
   player.pitch = THREE.MathUtils.clamp(player.pitch,-1.25,1.25);
 }
 function updateCamera(dt) {
-  camera.position.set(player.x, CONFIG.playerHeight, player.z);
+  camera.position.set(player.x, CONFIG.playerHeight + player.jumpHeight, player.z);
   camera.rotation.set(player.pitch,player.yaw,0,"YXZ");
   recoil=Math.max(0,recoil-dt*.4);
   weapon.position.z=THREE.MathUtils.lerp(weapon.position.z,-.56,Math.min(1,dt*18));
@@ -233,7 +239,10 @@ renderer.domElement.addEventListener("pointerdown",e=>{
     if(e.clientX<innerWidth*.36 && e.clientY>innerHeight*.55)return;
     lookPointer=e.pointerId;lastLookX=e.clientX;lastLookY=e.clientY;
     renderer.domElement.setPointerCapture(e.pointerId);
-  } else if(e.button===0 && document.pointerLockElement===renderer.domElement) shoot();
+  } else if(e.button===0 && started) {
+    if(document.pointerLockElement===renderer.domElement) shoot();
+    else if(renderer.domElement.requestPointerLock) renderer.domElement.requestPointerLock();
+  }
 });
 renderer.domElement.addEventListener("pointermove",e=>{
   if(isTouch && lookPointer===e.pointerId){
@@ -287,7 +296,11 @@ function animate(now) {
     const forwardX=-Math.sin(player.yaw),forwardZ=-Math.cos(player.yaw);
     const rightX=Math.cos(player.yaw),rightZ=-Math.sin(player.yaw);
     movePlayer((rightX*mx+forwardX*(-my))*player.speed*dt,(rightZ*mx+forwardZ*(-my))*player.speed*dt);
-    if(!player.grounded){player.vy-=14*dt;camera.position.y+=player.vy*dt;if(camera.position.y<=CONFIG.playerHeight){camera.position.y=CONFIG.playerHeight;player.vy=0;player.grounded=true;}}
+    if(!player.grounded){
+      player.vy-=14*dt;
+      player.jumpHeight+=player.vy*dt;
+      if(player.jumpHeight<=0){player.jumpHeight=0;player.vy=0;player.grounded=true;input.jumping=false;}
+    }
     if(input.firing && isTouch && now-lastShot>210)shoot();
     networkTimer+=dt;
     if(network.connected && networkTimer>.05){
