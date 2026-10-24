@@ -27,8 +27,8 @@ const sun = new THREE.DirectionalLight(0xfff0cf, 2.6);
 sun.position.set(-12, 24, 8);
 sun.castShadow = !isTouch;
 sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -28; sun.shadow.camera.right = 28;
-sun.shadow.camera.top = 28; sun.shadow.camera.bottom = -28;
+sun.shadow.camera.left = -43; sun.shadow.camera.right = 43;
+sun.shadow.camera.top = 43; sun.shadow.camera.bottom = -43;
 scene.add(sun);
 
 const mats = {
@@ -55,11 +55,12 @@ function addBox(x, y, z, sx, sy, sz, material, collide = true) {
 }
 
 // Arena
-addBox(0, -0.35, 0, 50, 0.7, 50, mats.ground, false);
-addBox(0, 1.5, -25, 50, 3, 1, mats.concrete);
-addBox(0, 1.5, 25, 50, 3, 1, mats.concrete);
-addBox(-25, 1.5, 0, 1, 3, 50, mats.concrete);
-addBox(25, 1.5, 0, 1, 3, 50, mats.concrete);
+// Arena ampliada: as árvores ficam dentro do perímetro, com margem até a face interna das paredes.
+addBox(0, -0.35, 0, 82, 0.7, 82, mats.ground, false);
+addBox(0, 1.5, -40, 80.5, 3, 1, mats.concrete);
+addBox(0, 1.5, 40, 80.5, 3, 1, mats.concrete);
+addBox(-40, 1.5, 0, 1, 3, 80.5, mats.concrete);
+addBox(40, 1.5, 0, 1, 3, 80.5, mats.concrete);
 
 // Boundary stripes and low-poly cover.
 for (let i = -22; i <= 22; i += 4) {
@@ -78,9 +79,20 @@ for (const [x,z,sx,sz] of cover) {
   // Decorative crate slats
   addBox(x, .85, z - sz/2 - .012, sx*.82, .08, .035, mats.crateLight, false);
 }
+const spawnPoints = [[-17,-17],[-8,-18],[4,-18],[17,-15],[-18,0],[18,0],[-17,18],[17,18]];
+const rockPositions = [];
 for (let i=0; i<22; i++) {
-  const x = (Math.random()-.5)*44, z = (Math.random()-.5)*44;
-  if (Math.abs(x)<5 && z>0 && z<10) continue;
+  let x=0, z=0, valid=false;
+  for (let attempt=0; attempt<60 && !valid; attempt++) {
+    x = (Math.random()-.5)*46; z = (Math.random()-.5)*46;
+    const nearStart = Math.abs(x)<5 && z>0 && z<10;
+    const nearCover = cover.some(([cx,cz,sx,sz]) => Math.abs(x-cx)<sx/2+0.8 && Math.abs(z-cz)<sz/2+0.8);
+    const nearSpawn = spawnPoints.some(([sx,sz]) => Math.hypot(x-sx,z-sz)<1.4);
+    const nearRock = rockPositions.some(([rx,rz]) => Math.hypot(x-rx,z-rz)<0.9);
+    valid = !nearStart && !nearCover && !nearSpawn && !nearRock && Math.hypot(x,z)<28;
+  }
+  if (!valid) continue;
+  rockPositions.push([x,z]);
   const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(.15+Math.random()*.25,0), new THREE.MeshStandardMaterial({color: i%2 ? 0x76856b:0x8b967c, roughness:1}));
   rock.position.set(x,.02,z); rock.rotation.set(Math.random(),Math.random(),Math.random()); rock.scale.y=.45; scene.add(rock);
 }
@@ -106,16 +118,26 @@ function createTarget(x,z,index) {
   group.userData = { index, alive:true, baseX:x, baseZ:z, phase:Math.random()*Math.PI*2, body, head };
   targetGroup.add(group); targets.push(group);
 }
-const spawnPoints = [[-17,-17],[-8,-18],[4,-18],[17,-15],[-18,0],[18,0],[-17,18],[17,18]];
 spawnPoints.slice(0,CONFIG.targetCount).forEach(([x,z],i)=>createTarget(x,z,i));
 
-// Decorative low-poly trees beyond the walls (visible over the boundary in the skybox area).
+// Árvores low-poly dentro da arena. O raio máximo das copas fica abaixo da face interna das paredes.
 const treeMat = new THREE.MeshStandardMaterial({color:0x315f4a, roughness:1});
 const trunkMat = new THREE.MeshStandardMaterial({color:0x6c5036, roughness:1});
-for (let i=0;i<28;i++) {
-  const a=i/28*Math.PI*2, r=31+Math.random()*5, x=Math.cos(a)*r,z=Math.sin(a)*r;
-  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.18,.25,1.2,5),trunkMat);trunk.position.set(x,.6,z);scene.add(trunk);
-  const crown=new THREE.Mesh(new THREE.ConeGeometry(1.1+Math.random()*.5,2.8,5),treeMat);crown.position.set(x,2.25,z);crown.rotation.y=Math.random();scene.add(crown);
+const treeCount = 32;
+for (let i=0;i<treeCount;i++) {
+  const a=i/treeCount*Math.PI*2;
+  const r=32.5+(i%3)*1.25;
+  const x=Math.cos(a)*r, z=Math.sin(a)*r;
+  const tree = new THREE.Group();
+  tree.position.set(x,0,z);
+  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.18,.25,1.2,5),trunkMat);
+  trunk.position.y=.6; trunk.castShadow=!isTouch; trunk.receiveShadow=!isTouch; tree.add(trunk);
+  const crownRadius=1.15+(i%3)*.12;
+  const crown=new THREE.Mesh(new THREE.ConeGeometry(crownRadius,2.8,5),treeMat);
+  crown.position.y=2.25; crown.rotation.y=i*0.71; crown.castShadow=!isTouch; crown.receiveShadow=!isTouch; tree.add(crown);
+  scene.add(tree);
+  // Pequena caixa de colisão para que o jogador não atravesse o tronco.
+  colliders.push({minX:x-.25,maxX:x+.25,minZ:z-.25,maxZ:z+.25,minY:0,maxY:1.2,mesh:trunk});
 }
 
 // Placeholder first-person weapon, attached to the camera.

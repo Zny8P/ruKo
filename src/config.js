@@ -6,6 +6,6 @@ export const CONFIG = {
   moveSpeed: 5.2,
   lookSensitivity: 0.0025,
   playerHeight: 1.65,
-  arenaHalfSize: 24,
+  arenaHalfSize: 39,
   targetCount: 8,
 };

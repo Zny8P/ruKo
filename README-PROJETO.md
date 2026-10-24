@@ -64,10 +64,17 @@ O servidor deverá validar movimento, colisões, cadência de tiro e dano. Nunca
 5. Adicionar salas e, depois, Battle Royale.
 
 
-## Correções da revisão v0.2
+## Correções da revisão v0.3
 - Ponto inicial movido para uma área livre da arena.
 - Pulo corrigido para usar uma altura vertical persistente do jogador.
 - Limites de movimento ajustados para aproveitar melhor a arena sem atravessar as paredes.
 - Clique no jogo volta a solicitar o bloqueio do mouse após sair com Esc.
 - Estado do pulo agora acompanha a subida e é limpo ao aterrissar.
 - Removida chamada duplicada de atualização da mira no controle por toque.
+
+
+### Atualizações v0.3
+- Arena ampliada para 80 × 80 unidades.
+- Árvores dentro do perímetro das paredes, com margem livre entre as copas e o muro.
+- Colisão simples nos troncos.
+- Pedras distribuídas com verificações de distância de caixas, pontos de surgimento dos alvos e outras pedras.
