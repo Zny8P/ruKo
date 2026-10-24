@@ -158,9 +158,100 @@ const raycaster = new THREE.Raycaster();
 const center = new THREE.Vector2(0,0);
 const network = new NetworkClient(CONFIG.websocketUrl);
 const connectionLabel = document.querySelector("#connection-label");
-network.on("connected",()=>{connectionLabel.textContent="CONECTADO";});
-network.on("disconnected",()=>{connectionLabel.textContent="DESCONECTADO";});
-network.on("offline",()=>{connectionLabel.textContent="MODO DE TESTE";});
+const remotePlayers = new Map();
+let localNetworkId = null;
+network.on("connected",()=>{
+  connectionLabel.textContent="CONECTANDO…";
+  network.emit("join", { mode:"survival", nickname:"Player" });
+});
+network.on("welcome",(message)=>{
+  localNetworkId = message.id;
+  if (message.player) {
+    player.x = message.player.x;
+    player.z = message.player.z;
+    player.yaw = message.player.yaw || 0;
+    player.pitch = message.player.pitch || 0;
+  }
+  connectionLabel.textContent="CONECTADO · 1";
+  showToast("Conectado ao servidor ruKo", 2200);
+});
+network.on("joined",(message)=>{
+  if (message.nickname) showToast(`Olá, ${message.nickname}!`, 1600);
+});
+network.on("snapshot",(message)=>{
+  const incoming = new Set();
+  for (const data of (message.players || [])) {
+    if (!data || !data.id) continue;
+    incoming.add(data.id);
+    if (data.id === localNetworkId) continue;
+    let remote = remotePlayers.get(data.id);
+    if (!remote) {
+      remote = createRemotePlayer(data);
+      remotePlayers.set(data.id, remote);
+    }
+    remote.target.set(data.x || 0, data.y || 0, data.z || 0);
+    remote.targetYaw = -(Number(data.yaw) || 0);
+    const nextNickname = data.nickname || "Player";
+    if (remote.nickname !== nextNickname) {
+      remote.nickname = nextNickname;
+      remote.nameSprite.material.map?.dispose();
+      remote.nameSprite.material.map = makeNameTexture(remote.nickname);
+      remote.nameSprite.material.needsUpdate = true;
+    }
+  }
+  for (const [id, remote] of remotePlayers) {
+    if (!incoming.has(id)) {
+      scene.remove(remote.group);
+      remote.group.traverse(obj => {
+        obj.geometry?.dispose();
+        if (obj.material) { obj.material.map?.dispose(); }
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+          else obj.material.dispose();
+        }
+      });
+      remotePlayers.delete(id);
+    }
+  }
+  connectionLabel.textContent = `CONECTADO · ${Math.max(1, incoming.size)}`;
+});
+network.on("disconnected",()=>{
+  connectionLabel.textContent="DESCONECTADO";
+  for (const remote of remotePlayers.values()) scene.remove(remote.group);
+  remotePlayers.clear();
+});
+network.on("offline",()=>{connectionLabel.textContent="SEM SERVIDOR";});
+network.on("network-error",()=>{connectionLabel.textContent="ERRO DE REDE";});
+
+function makeNameTexture(name) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "rgba(9,17,20,.78)";
+  ctx.beginPath(); ctx.roundRect(4, 6, 248, 52, 10); ctx.fill();
+  ctx.fillStyle = "#f2f7ed"; ctx.font = "bold 26px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(String(name).slice(0, 16), 128, 33);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+function createRemotePlayer(data) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color:0x57a6a1, roughness:.85 });
+  const headMat = new THREE.MeshStandardMaterial({ color:0xe0c9a6, roughness:.9 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.34, .7, 3, 6), bodyMat);
+  body.position.y = .9; group.add(body);
+  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(.25, 1), headMat);
+  head.position.y = 1.52; group.add(head);
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(.28, .09, .08), new THREE.MeshStandardMaterial({color:0x202a30}));
+  visor.position.set(0, 1.55, -.22); group.add(visor);
+  const labelMat = new THREE.SpriteMaterial({ map:makeNameTexture(data.nickname || "Player"), transparent:true, depthTest:false });
+  const nameSprite = new THREE.Sprite(labelMat);
+  nameSprite.position.y = 2.12; nameSprite.scale.set(1.45, .36, 1); group.add(nameSprite);
+  group.position.set(data.x || 0, data.y || 0, data.z || 0);
+  scene.add(group);
+  return { group, nameSprite, target:new THREE.Vector3(data.x || 0, data.y || 0, data.z || 0), targetYaw:0, nickname:data.nickname || "Player" };
+}
 
 function showToast(message, duration=2600) {
   const el=document.querySelector("#toast"); el.textContent=message; el.style.opacity="1";
@@ -296,8 +387,11 @@ document.querySelector("#start-button").addEventListener("click",async()=>{
   started=true;
   document.querySelector("#start-screen").classList.add("hidden");
   if(!isTouch && renderer.domElement.requestPointerLock) renderer.domElement.requestPointerLock();
-  // No backend configured yet. The network layer is ready to connect once URL is added in config.js.
-  if(CONFIG.networkEnabled && CONFIG.websocketUrl) await network.connect();
+  // Connect to the ruKo multiplayer server. If unavailable, the local training arena still loads.
+  if(CONFIG.networkEnabled && CONFIG.websocketUrl) {
+    connectionLabel.textContent="CONECTANDO…";
+    network.connect().then(ok => { if (!ok) connectionLabel.textContent="SEM CONEXÃO"; });
+  }
   showToast(isTouch?"Use o joystick e deslize à direita para mirar":"WASD para mover · clique para disparar",3500);
 });
 document.addEventListener("pointerlockchange",()=>{
@@ -327,8 +421,12 @@ function animate(now) {
     networkTimer+=dt;
     if(network.connected && networkTimer>.05){
       networkTimer=0;
-      network.emit("input",{moveX:mx,moveY:my,yaw:player.yaw,pitch:player.pitch,fire:input.firing,jump:input.jumping});
+      network.emit("input",{moveX:mx,moveY:my,yaw:-player.yaw,pitch:player.pitch,fire:input.firing,jump:input.jumping});
     }
+  }
+  for (const remote of remotePlayers.values()) {
+    remote.group.position.lerp(remote.target, Math.min(1, dt * 14));
+    remote.group.rotation.y = THREE.MathUtils.lerp(remote.group.rotation.y, remote.targetYaw, Math.min(1, dt * 12));
   }
   // Idle target bob makes the test targets easier to read.
   for(const t of targets) if(t.userData.alive) {
@@ -349,4 +447,4 @@ addEventListener("resize",resize);
 updateHUD();
 
 // Tiny debug API for future development, not used by normal gameplay.
-window.ZombieRoyale = { scene, camera, player, network, targets, config:CONFIG };
+window.ruKo = { scene, camera, player, network, targets, remotePlayers, config:CONFIG };

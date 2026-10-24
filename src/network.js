@@ -1,11 +1,11 @@
 /**
- * Camada de rede preparada para o backend.
+ * Cliente WebSocket do ruKo, ligado ao servidor Node.js no Render.
  * Protocolo sugerido:
  * client -> { type: "join", mode: "survival", nickname: "Player" }
  * client -> { type: "input", seq, moveX, moveY, yaw, pitch, fire, jump }
  * server -> { type: "snapshot", tick, players: [], zombies: [], projectiles: [] }
  *
- * O servidor deverá validar movimento, dano, acertos e estado da partida.
+ * O servidor valida e distribui o estado básico dos jogadores.
  */
 export class NetworkClient {
   constructor(url = "") {
